@@ -1,0 +1,100 @@
+
+
+using DifferentialEquations, Sundials, NLsolve, Plots, StaticArrays
+
+include("props_regression.jl")
+# --- 1. Preparación de Funciones Auxiliares ---
+# (Asegúrate de haber corrido previamente tus regresiones de props_regression.jl)
+
+# --- 2. Función del Sistema DAE ---
+function ldac_dae!(res, du, u, p, x)
+    # u = [Ta, ωa, Ts, ξw, ω_int, dq, dm]
+    Ta, ωa, Ts, ξw, ω_int, dq_alg, dm_alg = u
+    dTa, dωa, dTs, dξw, dω_int, ddq, ddm = du
+    
+    # Propiedades dinámicas
+    Pv_sol = _Pᵥₐₚₒᵣ_ₛₒₗ(Ts, ξw)
+    cp_s   = _cpₛₒₗ(Ts, ξw)
+    cp_a   = _cpₐ(Ta, ωa)
+    h_evap = i_fg(Ts)
+    
+    # Coeficientes de transferencia (Pueden ser dinámicos aquí)
+    ht = 35.0 
+    hm = 0.035 
+
+    # --- Residuos de Ecuaciones Diferenciales ---
+    res[1] = dTa - (-dq_alg / (ṁ_a * cp_a))
+    res[2] = dωa - (-dm_alg / ṁ_a)
+    res[3] = dTs - ((-dq_alg + dm_alg * h_evap) / (ṁ_s * cp_s))
+    res[4] = dξw - (-dm_alg / ṁ_s)
+    
+    # --- Residuos de Ecuaciones Algebraicas ---
+    res[5] = ω_int - (0.62185 * Pv_sol / (101325.0 - Pv_sol))
+    res[6] = dq_alg - (ht * FD * (Ta - Ts))
+    res[7] = dm_alg - (hm * FD * (ωa - ω_int))
+end
+
+# --- 3. Función de Disparo (Shooting) ---
+function solve_ldac_dae(guess)
+    # guess = [Ts_fondo, ξw_fondo]
+    
+    # 1. Calcular valores algebraicos consistentes para u0
+    Pv_init = _Pᵥₐₚₒᵣ_ₛₒₗ(guess[1], guess[2])
+    wi_init = 0.62185 * Pv_init / (101325.0 - Pv_init)
+    dq_init = 35.0 * FD * (Ta_in - guess[1])
+    dm_init = 0.035 * FD * (ωa_in - wi_init)
+
+    u0 = [Ta_in, ωa_in, guess[1], guess[2], wi_init, dq_init, dm_init]
+    du0 = zeros(7) # IDA ajustará du0 internamente
+    
+    # 2. Definir variables diferenciales (true) y algebraicas (false)
+    diff_vars = [true, true, true, true, false, false, false]
+    
+    prob = DAEProblem(ldac_dae!, du0, u0, (0.0, H_total), differential_vars=diff_vars)
+    sol = solve(prob, IDA(), reltol=1e-8, abstol=1e-8)
+    return sol
+end
+
+function residual_shooting!(residual, guess)
+    sol = solve_ldac_dae(guess)
+    residual[1] = sol.u[end][3] - Ts_in_target
+    residual[2] = sol.u[end][4] - ξw_in_target
+end
+
+# --- 4. Ejecución del Solver ---
+println("Resolviendo LDAC como sistema DAE...")
+guess_fondo = [24.5 + 273.15, 0.73]
+res_nlsolve = nlsolve(residual_shooting!, guess_fondo)
+
+if converged(res_nlsolve)
+    sol_final = solve_ldac_dae(res_nlsolve.zero)
+    
+    # --- 5. Gráficas de Resultados ---
+    z = sol_final.t
+    p1 = plot(z, [u[1]-273.15 for u in sol_final.u], label="Aire", ylabel="T [°C]", title="Perfiles DAE")
+    plot!(p1, z, [u[3]-273.15 for u in sol_final.u], label="Solución")
+    
+    p2 = plot(z, [u[2] for u in sol_final.u], label="ω aire", color=:green, ylabel="ω [kg/kg]")
+    plot!(p2, z, [u[5] for u in sol_final.u], label="ω interface", color=:black, linestyle=:dash)
+    
+    p3 = plot(z, [u[4] for u in sol_final.u], label="ξ agua", color=:blue, xlabel="Altura [m]", ylabel="Frac. Masa")
+    
+    display(plot(p1, p2, p3, layout=(3,1), size=(800, 900)))
+
+    # --- 6. Balance de Masa Global ---
+    wa_in_final = sol_final.u[1][2]
+    wa_out_final = sol_final.u[end][2]
+    xw_out_final = sol_final.u[1][4]
+    xw_in_final = sol_final.u[end][4]
+
+    agua_aire = ṁ_a * (wa_in_final - wa_out_final)
+    agua_sol  = ṁ_s * (xw_out_final - xw_in_final)
+    error_rel = abs(agua_aire - agua_sol) / agua_aire * 100
+
+    println("\n--- BALANCE DE MASA (DAE) ---")
+    println("Remoción del aire:    ", round(agua_aire * 1e6, digits=4), " mg/s")
+    println("Absorción solución:   ", round(agua_sol * 1e6, digits=4), " mg/s")
+    println("Error del balance:    ", round(error_rel, digits=6), " %")
+else
+    println("El método de disparo DAE no convergió.")
+end

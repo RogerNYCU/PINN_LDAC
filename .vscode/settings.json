@@ -1,0 +1,23 @@
+{
+    "iis.configDir": "",
+    "workbench.colorCustomizations": {
+        "activityBar.activeBackground": "#72aeda",
+        "activityBar.background": "#72aeda",
+        "activityBar.foreground": "#15202b",
+        "activityBar.inactiveForeground": "#15202b99",
+        "activityBarBadge.background": "#f8e6f0",
+        "activityBarBadge.foreground": "#15202b",
+        "commandCenter.border": "#15202b99",
+        "sash.hoverBorder": "#72aeda",
+        "statusBar.background": "#4997d0",
+        "statusBar.foreground": "#15202b",
+        "statusBarItem.hoverBackground": "#2f7eb7",
+        "statusBarItem.remoteBackground": "#4997d0",
+        "statusBarItem.remoteForeground": "#15202b",
+        "titleBar.activeBackground": "#4997d0",
+        "titleBar.activeForeground": "#15202b",
+        "titleBar.inactiveBackground": "#4997d099",
+        "titleBar.inactiveForeground": "#15202b99"
+    },
+    "peacock.color": "#4997D0"
+}
